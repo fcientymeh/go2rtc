@@ -17,6 +17,11 @@ func LoadConfig(v any) {
 			Logger.Warn().Err(err).Send()
 		}
 	}
+	// tutaj z brokera ladujemy nowy config
+	// z uwagi ze z tego korzystaja wszystkie moduly, synhcronizacja musi byc gdzies tutaj.
+	// watek bedzie odbierał info z brokera, i huj/
+	// a ze dziala se na pliku to dobrze, tylko ten plik bede synchronizowal
+
 }
 
 var configMu sync.Mutex
@@ -36,6 +41,7 @@ func PatchConfig(path []string, value any) error {
 	if err != nil {
 		return err
 	}
+	//tutaj wysylamy info do brokera, z nowym configiem
 
 	return os.WriteFile(ConfigPath, b, 0644)
 }
@@ -92,6 +98,8 @@ func initConfig(confs flagConfig) {
 		}
 		Info["config_path"] = ConfigPath
 	}
+
+	//wywolac sobie loadSynchConfigFromBroker(), ktory się zasubskrybuje i bedzie sprawdzał updejty configa
 }
 
 func parseConfString(s string) []byte {
