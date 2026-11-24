@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/pkg/core"
@@ -24,6 +25,7 @@ type Conn struct {
 	// public
 
 	Backchannel bool
+	Keyframe    string // how video tracks request keyframes
 	Media       string
 	OnClose     func() error
 	PacketSize  uint16
@@ -35,22 +37,29 @@ type Conn struct {
 
 	// internal
 
-	auth      *tcp.Auth
-	conn      net.Conn
-	keepalive int
-	mode      core.Mode
-	playOK    bool
-	playErr   error
-	reader    *bufio.Reader
-	sequence  int
-	session   string
-	uri       string
+	auth        *tcp.Auth
+	backchannel *Conn // separate session for backchannel, added while playing
+	conn        net.Conn
+	keepalive   int
+	mode        core.Mode
+	playOK      bool
+	playErr     error
+	reader      *bufio.Reader
+	redirects   int
+	sequence    int
+	session     string
+	uri         string
 
 	state   State
 	stateMu sync.Mutex
 
 	udpConn []*net.UDPConn
 	udpAddr []*net.UDPAddr
+
+	keyframeNext atomic.Int64 // earliest time of the next RequestKeyframe
+	keyframeChan atomic.Uint32
+	keyframeSSRC atomic.Uint32
+	firSeq       atomic.Uint32
 }
 
 const (
@@ -292,6 +301,9 @@ func (c *Conn) handleRawPacket(channel byte, buf []byte) error {
 		if err := packet.Unmarshal(buf); err != nil {
 			return err
 		}
+		if c.keyframeChan.Load() == uint32(channel) {
+			c.keyframeSSRC.Store(packet.SSRC)
+		}
 
 		for _, receiver := range c.Receivers {
 			if receiver.ID == channel {
@@ -336,6 +348,12 @@ func (c *Conn) WriteRequest(req *tcp.Request) error {
 
 	if c.session != "" {
 		req.Header.Set("Session", c.session)
+	}
+
+	// ONVIF Streaming Specification 5.3.1 requires the backchannel tag in
+	// requests that use this feature.
+	if c.Backchannel {
+		req.Header.Set("Require", "www.onvif.org/ver20/backchannel")
 	}
 
 	if req.Body != nil {

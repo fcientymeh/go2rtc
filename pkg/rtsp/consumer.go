@@ -26,6 +26,12 @@ func (c *Conn) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiv
 		defer c.stateMu.Unlock()
 
 		if c.state == StatePlay {
+			// try a separate session first, so the running session is not interrupted
+			if err = c.addBackchannel(media, codec, track); err == nil {
+				return
+			}
+			c.Fire("RTSP backchannel session failed: " + err.Error())
+
 			if err = c.Reconnect(); err != nil {
 				return
 			}
@@ -86,7 +92,7 @@ func (c *Conn) packetWriter(codec *core.Codec, channel, payloadType uint8) core.
 
 	flushBuf := func() {
 		//log.Printf("[rtsp] channel:%2d write_size:%6d buffer_size:%6d", channel, n, len(buf))
-		if err := c.writeInterleavedData(buf[:n]); err != nil {
+		if err := c.writeInterleavedData(buf[:n]); err == nil {
 			c.Send += n
 		}
 		n = 0
